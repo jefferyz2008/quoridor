@@ -1,0 +1,942 @@
+from cmu_graphics import *
+import copy
+import math
+import random
+from PIL import Image
+import os, pathlib
+def openImage(fileName):
+    return Image.open(os.path.join(pathlib.Path(__file__).parent,fileName))
+#############
+def distance(x1,y1,x2,y2):
+    return ((x1-x2)**2+(y1-y2)**2)**0.5
+def getAllWalls():
+    #gets all possible walls in the board
+    #wall represented by top,left,direction all are length 2
+    allWalls=[]
+    for row in range(0,15,2):
+        for col in range(1,16,2):
+           allWalls.append((row,col,"vert"))
+    for row in range(1,16,2):
+        for col in range(0,15,2): 
+            allWalls.append((row,col,"hori"))
+    return allWalls
+def hasGotToEnd(queue,goalRow):
+#if the queue has got to the end
+    for row,col in queue:
+        if row==goalRow:
+            return True
+
+def findFastSolution(map,finalRow):
+    #Takes in a map of predecessors and finds the path
+    map=copy.deepcopy(map)
+    path=[]
+    for coord in map[finalRow]:
+        if coord!=None:
+            #coord from where it came
+            path.append((finalRow,map[finalRow].index(coord)))
+            if coord=="s":
+                return 
+            currRow,currCol=coord
+    while map[currRow][currCol]!="s":
+        path.append((currRow,currCol))
+        currRow,currCol=map[currRow][currCol][0],map[currRow][currCol][1]
+    path.append((currRow,currCol))
+    return path[::-1]
+def breadthSearch(board,piece,visited=None,queue=None):
+    if visited == None:
+        visited=[]
+    if queue == None:
+        queue=[]
+    #returns path in the right order starting at where the piece is
+    board=copy.deepcopy(board)
+    startCol=piece.col
+    startRow=piece.row
+    
+    queue.append((startRow,
+                   startCol))
+    #previous is a map of predecessors
+    previous=[[(None) for _ in range(17)] for _ in range(17)]
+    previous[startRow][startCol]="s"
+    while queue:
+        #if found a path, return the fath
+        if hasGotToEnd(queue,0 if piece.color=="black" else 16):
+            return findFastSolution(previous,0 if piece.color=="black" else 16)
+        if (queue[-1]) in visited:
+                queue.pop()
+        currRow=queue[-1][0]
+        currCol=queue[-1][1]
+        board[currRow][currCol]=piece
+        #checks all moves
+        for drow,dcol in [(2,0),(0,2),(0,-2),(-2,0),(4,0),(0,4),(0,-4),(-4,0)]:
+            if isLegalMoveBreadth(currRow,currCol,drow,dcol,board):
+                if ((currRow+drow,currCol+dcol) not in queue and 
+                    (currRow+drow,currCol+dcol) not in visited):
+                    #adds this to the queue and maps the value in the queue
+                    #to the current row and current col
+                    previous[currRow+drow][currCol+dcol]=(currRow,currCol)
+                    queue=[(currRow+drow,currCol+dcol)]+queue
+        visited.append((currRow,currCol))
+        board[currRow][currCol]=0
+        queue.pop()
+    return None
+def restartGame(app,player1,player2):
+    #restarts the game
+    app.beginningScreen=True
+    app.player1=player1
+    app.player2=player2
+    app.gameBoard=quoridorBoard(app.player1,app.player2)
+    app.gameOver=False
+    app.width=1500
+    app.height=900
+    app.boardLeft=50
+    app.boardTop=50
+    app.numRows=9
+    app.numCols=9
+    app.size=(app.height-app.boardTop*2)/9
+    app.wallBeingPlaced=None
+    app.pieceFlashing=None
+    app.selectedCell=None
+    app.movingPiece=False
+    app.pieceCell=None
+    app.highLightedCells=[]
+    app.computerSelected=False
+    app.helpScreen=False
+#######################
+
+
+def isLegalMove(row,col,drow,dcol,board):
+    #returns legal move or legal jump
+    if (drow!=0 and dcol!=0) or drow>4 or dcol<-4 or drow<-4 or dcol>4:
+        return False
+    return (row+drow<=16 and row+drow>=0 and col+dcol<=16 and col+dcol>=0 
+    and board[row+int(drow/2)][col+int(dcol/2)]==8 
+    and board[row+drow][col+dcol]==0) or isLegalJump(row,col,drow,dcol,board)
+def isLegalMoveBreadth(row,col,drow,dcol,board):
+    #used for bfs algorithim 
+    #only difference from prev function is this one ignores opponent's piece
+    if (drow!=0 and dcol!=0) or drow>4 or dcol<-4 or drow<-4 or dcol>4:
+        return False
+    return ((row+drow<=16 and row+drow>=0 and col+dcol<=16 and col+dcol>=0 
+    and board[row+int(drow/2)][col+int(dcol/2)]==8) or 
+    isLegalJump(row,col,drow,dcol,board))
+def isLegalJump(row,col,drow,dcol,board):
+    #returns if a jump is legal
+    #drow and dcol must be 4
+    drow=int(1/2*drow)
+    dcol=int(1/2*dcol)
+    return (row+drow*2<=16 and row+drow*2>=0 and col+dcol*2<=16 
+    and col+dcol*2>=0 and board[row+int(drow/2)][col+int(dcol/2)]!=7
+    and board[row+int(drow*3/2)][col+int(dcol*3/2)]!=7
+    and isinstance(board[row+drow][col+dcol],quoridorPlayer)
+    and board[row+drow*2][col+dcol*2]==0)
+def isWallPositionLegal(top,left,direction):
+    #checks if a wall is on the board
+    if left<0 or top<0 or left>16 or top>16:
+        return False
+    if direction=="hori":
+        if top%2==0 or left%2!=0:
+            return False
+        if left>14:
+            return False
+    if direction=="vert":
+        if left%2==0 or top%2!=0:
+            return False
+        if top>14:
+            return False
+    return True
+def isWallLegal(board,top,left,direction):
+    #checks if wall is overLapping
+    if not isWallPositionLegal(top,left,direction):
+        return False
+    if board[top][left]!=8:
+        return False
+    if direction=="hori":
+        return (board[top][left+1]==8 and board[top][left+2]==8)
+    if direction=="vert":
+        return (board[top+1][left]==8 and board[top+2][left]==8)
+
+#############################
+def getAllMoves(piece,board):
+    #Get all possible legal moves and walls in the board
+    moves=[]
+    piece=copy.deepcopy(piece)
+    board=copy.deepcopy(board)
+    oppPiece=board.whitePlayer if piece.color=="black" else board.blackPlayer
+    allWalls=getAllWalls() if piece.color=="black" else getAllWalls()[::-1]
+    for wall in allWalls:
+        if abs(wall[0]-oppPiece.row)>6 or abs(wall[1]-oppPiece.col)>6:
+            continue
+        if (isWallLegal(board.board,wall[0],wall[1],wall[2]) and
+     board.backtrack(board.whitePlayer) and board.backtrack(board.blackPlayer)):
+            moves.append(wall)
+    for drow,dcol in [(2,0),(0,2),(0,-2),(-2,0),(4,0),(0,4),(0,-4),(-4,0)]:
+        if isLegalMove(piece.row,piece.col,drow,dcol,board.board):
+            moves.append((drow,dcol))
+    return moves
+def getBestMoveWall(board,piece):
+    #goes through all possible moves and picks the best one
+    oppPiece=board.blackPlayer if piece.color=="white" else board.whitePlayer
+    board=copy.deepcopy(board)
+    piece=copy.deepcopy(piece)
+    board.currTurn="any"
+    allMoves=getAllMoves(piece,board)
+    bestSelfMoves=100000
+    bestOppMoves=-100000
+    bestMove=[]
+    bestWall=[]
+    selfMovesToEnd=0
+    oppMovesToEnd=0
+    for move in allMoves:
+        prevBoard=copy.deepcopy(board)
+        prevRow=piece.row
+        prevCol=piece.col
+        board=copy.deepcopy(board)
+        if len(move)==2:
+            piece.movePiece(board,move[0],move[1])
+            if findWinner(board):
+                return "gameOver"
+            selfMovesToEnd=len(board.backtrack(piece))
+            if selfMovesToEnd<bestSelfMoves:
+                bestSelfMoves=selfMovesToEnd
+                bestMove=[move]
+            elif selfMovesToEnd==bestSelfMoves:
+                bestMove.append(move)
+        elif len(move)==3:
+            prevOppMovesToEnd=len(board.backtrack(oppPiece))
+            board.placeWall(move[0],move[1],move[2])
+            oppMovesToEnd=len(board.backtrack(oppPiece))
+            if oppMovesToEnd-prevOppMovesToEnd>bestOppMoves:
+                bestOppMoves=oppMovesToEnd-prevOppMovesToEnd
+                bestWall=[]
+                bestWall.append(move)
+            elif oppMovesToEnd-prevOppMovesToEnd==bestOppMoves:
+                bestWall.append(move)
+        board=prevBoard
+        piece.row=prevRow
+        piece.col=prevCol
+    return (bestMove,bestWall,bestOppMoves) 
+def rotate(grid):
+    #used for the ai to block off the openings in the board
+    result=[]
+    for i in range(len(grid)):
+        currRow=[]
+        for t in range(len(grid)):
+            currRow.append(grid[t][i])
+        result.append(currRow)
+    return result
+def getAllTwoSpaceOpeningsHori(board):
+    #gets all openings where that opening can be blocked by a wall on the next 
+    #turn
+    allOpenings=[]
+    for row in range(len(board.board)):
+        for index in range(0,15,2):
+            #checks that it is a valid opening surrounded by walls
+            if (((index==0 or board.board[row][index-1]==7 or
+                   board.board[row][index-2]==7) and 
+            (index+2==16 or 
+             board.board[row][index+3]==7 or board.board[row][index+4]==7))):
+                if (board.board[row][index]==8 and board.board[row][index+1]==8 
+                    and board.board[row][index+2]==8):
+                   allOpenings.append((row,index,"hori"))
+    return allOpenings
+def getAllTwoSpaceOpenings(board):
+    #gets all two space openings on the board that are surrounded by walls
+    #both horizontal and vertical
+    board=copy.deepcopy(board)
+    openings=getAllTwoSpaceOpeningsHori(board)
+    board.board=rotate(board.board)
+    for opening in getAllTwoSpaceOpeningsHori(board):
+        openings.append((opening[1],opening[0],"vert"))
+    return openings
+
+def getClosestOpening(board,piece):
+    #gets closest 2 space opening to a piece 
+    #used for the computer player to consider
+    minDist=None
+    closestOpening=None
+    allOpenings=getAllTwoSpaceOpenings(board)
+    for opening in allOpenings:
+        if opening[2]=="hori":
+            currDistance=distance(piece.col,piece.row,opening[1]+1,opening[0])
+            if minDist==None or currDistance<minDist:
+                minDist=currDistance
+                closestOpening=opening
+        if opening[2]=="vert":
+            currDistance=distance(piece.col,piece.row,opening[1],opening[0]+1)
+            if minDist==None or currDistance<minDist:
+                minDist=currDistance
+                closestOpening=opening
+    return closestOpening
+
+            
+
+class quoridorBoard():
+    ##The gameboard
+    def __init__(self,whitePlayer,blackPlayer):
+        self.whitePlayer=whitePlayer
+        self.blackPlayer=blackPlayer
+        b=self.blackPlayer
+        w=self.whitePlayer
+        self.board=[[0,8,0,8,0,8,0,8,w,8,0,8,0,8,0,8,0],
+                    [8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8],
+                    [0,8,0,8,0,8,0,8,0,8,0,8,0,8,0,8,0],
+                    [8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8],
+                    [0,8,0,8,0,8,0,8,0,8,0,8,0,8,0,8,0],
+                    [8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8],
+                    [0,8,0,8,0,8,0,8,0,8,0,8,0,8,0,8,0],
+                    [8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8],
+                    [0,8,0,8,0,8,0,8,0,8,0,8,0,8,0,8,0],
+                    [8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8],
+                    [0,8,0,8,0,8,0,8,0,8,0,8,0,8,0,8,0],
+                    [8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8],
+                    [0,8,0,8,0,8,0,8,0,8,0,8,0,8,0,8,0],
+                    [8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8],
+                    [0,8,0,8,0,8,0,8,0,8,0,8,0,8,0,8,0],
+                    [8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8],
+                    [0,8,0,8,0,8,0,8,b,8,0,8,0,8,0,8,0]]
+        self.currTurn=self.blackPlayer
+        self.walls=[]
+    def backtrack(self,piece):
+        #searches for a path through the board
+        solution=breadthSearch(self.board,piece)
+        if not solution:
+            return False
+        piece.movesToEnd=len(solution)
+        piece.path=solution
+        return solution
+    def updateAll(self):
+        #sees if pieces can move to end
+        if not self.backtrack(self.whitePlayer):
+            return None
+        if not self.backtrack(self.blackPlayer):
+            return None
+        return True
+    def placeWall(self,top,left,direction):
+        #places wall
+        ####Mutates the board
+        prevBoard=copy.deepcopy(self.board)
+        if not isWallLegal(self.board,top,left,direction):
+            return None
+        if direction=="vert":
+            for row in range(top,top+3):
+                self.board[row][left]=7
+            self.walls.append(wall([top,left],[top+2,left]))
+        if direction=="hori":
+            for col in range(left,left+3):
+                self.board[top][col]=7
+            self.walls.append(wall([top,left],[top,left+2]))
+            
+        #if wall blocks the path of a player
+        if not self.updateAll():
+            self.board=prevBoard
+            self.walls.pop()
+            return None
+        self.currTurn=(self.whitePlayer if self.currTurn==self.blackPlayer else
+                       self.blackPlayer) 
+        self.updateAll()
+        return True
+    def __repr__(self):
+        result=""
+        for i in self.board:
+            result+=(str(i))
+        return result
+#################  
+class wall():
+    #walls are stored in the walls variable in the board class
+    def __init__(self,startRowCol,endRowCol):
+        self.startRowCol=startRowCol
+        self.endRowCol=endRowCol
+        if self.startRowCol[0]==self.endRowCol[0]:
+            self.direction="hori"
+        else:
+            self.direction="vert"
+    def __repr__(self):
+        return f"start:{self.startRowCol}, end:{self.endRowCol}"
+    def rotate(self):
+        #rotates the wall
+        prevStart=copy.copy(self.startRowCol)
+        prevEnd=copy.copy(self.endRowCol)
+        prevDir=self.direction
+        if self.startRowCol[0]<=12 and self.startRowCol[1]<=12:
+            self.startRowCol[0]+=1
+            self.startRowCol[1]+=1
+            self.endRowCol[0]+=1
+            self.endRowCol[0]+=1
+        elif self.startRowCol[0]>=2 and self.startRowCol[1]>=2:
+            self.startRowCol[0]-=1
+            self.startRowCol[1]-=1
+            self.endRowCol[0]-=1
+            self.endRowCol[0]-=1
+        if (self.direction=="hori" and self.startRowCol[0]<=12):
+            self.endRowCol=[self.startRowCol[0]+2,self.startRowCol[1]]
+            self.direction="vert"
+        elif (self.direction=="vert" and self.startRowCol[1]<=12):
+            self.endRowCol=[self.startRowCol[0],self.startRowCol[1]+2]
+            self.direction="hori"
+        if not isWallPositionLegal(self.startRowCol[0],self.startRowCol[1],
+                                   self.direction):
+            self.startRowCol=prevStart
+            self.endRowCol=prevEnd
+            self.direction=prevDir
+
+    
+    def move(self,drow,dcol):
+        #moves wall 
+        if drow!=2 and dcol!=2 and drow!=-2 and dcol!=-2:
+            return 
+        self.startRowCol[0]+=drow
+        self.startRowCol[1]+=dcol
+        self.endRowCol[0]+=drow
+        self.endRowCol[1]+=dcol
+        if (self.startRowCol[0]<0 or self.startRowCol[1]>16 or 
+            self.endRowCol[0]<0 or self.endRowCol[1]>16 or
+            self.startRowCol[1]<0 or self.startRowCol[0]>16 or 
+            self.endRowCol[1]<0 or self.endRowCol[0]>16):
+            #################
+            self.startRowCol[0]-=drow
+            self.startRowCol[1]-=dcol
+            self.endRowCol[0]-=drow
+            self.endRowCol[1]-=dcol
+    
+    def draw(self,app,fill):
+        #draws wall
+        if self.direction=="vert":
+            xPosStart=app.boardLeft+(app.size)*self.startRowCol[1]/2+app.size/2
+            yPosStart=app.boardTop+(app.size)*(self.startRowCol[0]//2)+5
+            xPosEnd=app.boardLeft+(app.size)*self.endRowCol[1]/2+app.size/2
+            yPosEnd=app.boardTop+(app.size)*(self.endRowCol[0]//2+1)-5
+            drawLine(xPosStart,yPosStart,xPosEnd,yPosEnd,fill=fill,lineWidth=8)
+        else:
+            xPosStart=app.boardLeft+(app.size)*self.startRowCol[1]/2+5
+            yPosStart=app.boardTop+(app.size)*(self.startRowCol[0]//2)+app.size
+            xPosEnd=app.boardLeft+(app.size)*(self.endRowCol[1]+1)/2+39
+            yPosEnd=app.boardTop+(app.size)*(self.endRowCol[0]//2)+app.size     
+            drawLine(xPosStart,yPosStart,xPosEnd,yPosEnd,fill=fill,lineWidth=8)
+
+    
+    def __eq__(self,other):
+        return (type(other)==wall and other.startRowCol==self.startRowCol and
+                other.endRowCol==self.endRowCol)  
+class quoridorPlayer():
+    def __init__(self,color,row,col):
+        self.color=color
+        self.wallsLeft=10
+        self.row=row
+        self.col=col
+        self.movesToEnd=None
+        self.path=None
+        self.level=""
+    def __repr__(self):
+        if self.color=="black":
+            return ""
+        if self.color=="white":
+            return ""
+    def placeWall(self,board,top,left,direction):
+    #places a wall and switches the turn
+        if board.currTurn!=self and board.currTurn!="any":
+            return
+        if self.wallsLeft>=1:
+           if board.placeWall(top,left,direction)!=None:
+               if board.currTurn=="any":
+                 return
+               if not board.updateAll():
+                   return
+               else:
+                   self.wallsLeft-=1
+                
+           else:
+               return False
+    def movePiece(self,board,drow,dcol):
+        #moves the piece the given drow and dcol
+        if board.currTurn!=self and board.currTurn!="any":
+            return
+        grid=board.board
+        if isLegalJump(self.row,self.col,drow*2,dcol*2,grid):
+            self.row+=2*drow
+            self.col+=2*dcol
+            drow*=2
+            dcol*=2
+        elif isLegalMove(self.row,self.col,drow,dcol,grid):
+            self.row+=drow
+            self.col+=dcol
+        else:
+            return  
+        if board.currTurn!="any": 
+           board.currTurn=(board.blackPlayer 
+                        if board.currTurn==board.whitePlayer else 
+                        board.whitePlayer)
+        grid[self.row][self.col]=self
+        grid[self.row-drow][self.col-dcol]=0
+        board.backtrack(self)
+    def __eq__(self,other):
+        if type(other)==quoridorPlayer and other.color==self.color:
+            return True
+class computerPlayer(quoridorPlayer):
+    def __init__(self,color,row,col,level):
+        super().__init__(color,row,col)
+        self.wallsLeft=10
+        self.path=None
+        self.movesToEnd=None
+        self.level=level
+    def makeBestMove(self,board):
+        #makes best move
+        oppPlayer=(board.blackPlayer if self.color=="white" else
+                    board.whitePlayer)
+        if findWinner(board):
+            return
+        if (self.color=="black" and self.row==2 and 
+            isLegalMove(self.row,self.col,-2,0,board.board)):
+            self.movePiece(board,-2,0)
+            return
+        if (self.color=="white" and self.row==14 and 
+            isLegalMove(self.row,self.col,2,0,board.board)):
+            self.movePiece(board,2,0)
+            return
+        copyBoard=copy.deepcopy(board)
+        opening=getClosestOpening(board,self)
+        #assumes that opponent will block off an opening
+        if (opening!=None and 
+            (abs(self.col-opening[1]<6) and abs(self.row-opening[0])<6 and 
+            oppPlayer.wallsLeft>0)):
+            if opening[2]=="hori":
+                #places wall through opening
+                copyBoard.board[opening[0]][opening[1]]=7
+                copyBoard.board[opening[0]][opening[1]+1]=7
+                copyBoard.board[opening[0]][opening[1]+2]=7 
+                #makes walls empty
+                if (not copyBoard.backtrack(board.whitePlayer) or 
+                    not copyBoard.backtrack(board.blackPlayer)):
+                    copyBoard.board[opening[0]][opening[1]]=8
+                    copyBoard.board[opening[0]][opening[1]+1]=8
+                    copyBoard.board[opening[0]][opening[1]+2]=8 
+            if opening[2]=="vert":
+                copyBoard.board[opening[0]][opening[1]]=7
+                copyBoard.board[opening[0]+1][opening[1]]=7
+                copyBoard.board[opening[0]+2][opening[1]]=7 
+                if (not copyBoard.backtrack(board.whitePlayer) or 
+                    not copyBoard.backtrack(board.blackPlayer)):
+                    copyBoard.board[opening[0]][opening[1]]=8
+                    copyBoard.board[opening[0]+1][opening[1]]=8
+                    copyBoard.board[opening[0]+2][opening[1]]=8 
+        if opening!=None and opening[2]=="hori":
+            #goes forward if it can
+            if abs(self.row-opening[0])==1 and abs(self.col-(opening[1]+1))==1:
+                bestMoves=getBestMoveWall(board,self)[0]
+            else:
+                bestMoves=getBestMoveWall(copyBoard,self)[0]
+        elif opening!=None and opening[2]=="vert":
+            if abs(self.col-opening[1])==1 and abs(self.row-(opening[0]+1))==1:
+                bestMoves=getBestMoveWall(board,self)[0]
+            else:
+                bestMoves=getBestMoveWall(copyBoard,self)[0]
+        else:
+            bestMoves=getBestMoveWall(board,self)[0]
+        if not bestMoves:
+            bestMoves=getBestMoveWall(board,self)[0]
+        bestWalls=getBestMoveWall(board,self)[1]
+        #chooses a random move 
+        bestMove=random.choice(bestMoves)
+        bestWall=random.choice(bestWalls)
+        bestWallScore=getBestMoveWall(board,self)[2]   
+        if self.wallsLeft<=0:
+            if not self.movePiece(board,*bestMove):
+                self.placeWall(board,*bestWall)
+        #if its behind, place a wall
+        if (len(board.backtrack(self))>len(board.backtrack(oppPlayer))
+            and bestWallScore>0):
+            self.placeWall(board,*bestWall)
+        else:
+            #if it's ahead, go forward
+            if type(bestMove)!=tuple:
+                (self.movePiece(board,0,2) or self.movePiece(board,0,-2) or 
+                 self.movePiece(board,2,0) or self.movePiece(board,-2,0))
+            else: self.movePiece(board,*bestMove)
+        board.currTurn=(board.whitePlayer if self.color=="black" else 
+                        board.blackPlayer)
+    def makeMove(self,board):
+        #makes move based on level
+        if findWinner(board) or board.currTurn!=self:
+            return
+        if self.level==2:
+            self.makeBestMove(board)
+            return
+        elif self.level==1:
+            num=random.randint(0,100)
+            if num>22:
+                self.makeBestMove(board)
+                return
+            else:
+                if self.color=="black" and self.movePiece(board,-2,0):
+                    return
+                if self.color=="white" and self.movePiece(board,2,0):
+                    return
+                if self.movePiece(board,0,2) or self.movePiece(board,0,-2):
+                    return
+                self.makeBestMove(board)
+        
+    def __eq__(self,other):
+        return isinstance(other,quoridorPlayer) and other.color==self.color
+    def __repr__(self):
+        return f"level {self.level}"
+
+def onAppStart(app):
+    app.labelFill="green"
+    app.ruleLabel=""
+    app.introScreen=True
+    app.background="lightGreen"
+    player1=quoridorPlayer("white",0,8)
+    app.image=Image.open('board.jpg')
+    app.image=CMUImage(app.image)
+    app.rulesShown=False
+    player2=quoridorPlayer("black",16,8)
+    app.stepsPerSecond=4
+    restartGame(app,player1,player2)
+def onStep(app):
+    #flashes introscreen
+    if app.introScreen:
+        app.labelFill=rgb(random.randint(0,255),random.randint(0,255),
+                          random.randint(0,255))
+    #checks winner
+    if findWinner(app.gameBoard):
+        app.gameOver=True
+    #updates the current situation of the board
+    app.gameBoard.updateAll()
+    #flashes the walls being placed
+    app.pieceFlashing=True if app.pieceFlashing==False else False
+    #makes the computer moves
+    if (app.gameBoard.currTurn==app.player1 and 
+        type(app.player1)==computerPlayer):
+        app.player1.makeMove(app.gameBoard)
+    #makes the computer moves
+    elif (app.gameBoard.currTurn==app.player2 and 
+        type(app.player2)==computerPlayer):
+        app.player2.makeMove(app.gameBoard)
+def findWinner(board):
+    #finds winner in the board
+    if board.whitePlayer in board.board[16]:
+        return "white"
+    if board.blackPlayer in board.board[0]:
+        return "black"
+    return None
+
+def drawAllWalls(app):
+    #draws all walls
+    for wall in app.gameBoard.walls:
+        wall.draw(app,"tan")
+    if app.wallBeingPlaced and app.pieceFlashing:
+        app.wallBeingPlaced.draw(app,rgb(240,210,200))
+    pass
+
+def getCell(app, x, y):
+    dx = x - app.boardLeft
+    dy = y - app.boardTop
+    cellWidth, cellHeight =app.size,app.size
+    row = math.floor(dy / cellHeight)
+    col = math.floor(dx / cellWidth)
+    if (0 <= row < 9) and (0 <= col < 9):
+        return (row, col)
+    else:
+        return None   
+def drawHelpScreen(app):
+    #draws the rules and instructions
+    if app.helpScreen and not app.introScreen:
+        drawRect(100,100,600,400,fill="skyBlue")
+        drawLabel("HOW TO USE THE CONTROLS",370,150,size=30,font="Impact")
+        drawLabel("To move the piece, click your piece with the mouse and select",
+                  420,210,size=20)
+        drawLabel("one of highlighted squares. You can also move your piece with ",
+                  420,250,size=20)
+        drawLabel("the arrow keys. To place a wall, click space to generate a",
+                  420,290,size=20)
+        drawLabel("wall. You can use the arrow keys to move it and you can ",
+                  420,330,size=20)
+        drawLabel("To delete a wall before you place it, press backspace.",
+                  420,370,size=20)
+        drawLabel("press r to rotate it. Remember that your walls cannot fully",
+                  420,410,size=20)
+        drawLabel("trap your opponent. You only have 10 of them. Use them wisely.",
+                  410,440,size=20)
+    if app.helpScreen and app.introScreen:
+        drawRect(100,100,640,400,fill="skyBlue")
+        drawLabel("HOW TO PLAY QUORIDOR",375,170,size=30,font="Impact")
+        drawLabel("Welcome to Quoridor! In this game, there are two players, white",
+                  420,210,size=20)
+        drawLabel("and black. The goal of the game is to move your piece to the ",
+                  420,250,size=20)
+        drawLabel("opposite side of the board before your opponent does. You are",
+                  420,290,size=20)
+        drawLabel("allowed to place walls to block you're opponent. On each move,",
+                  420,330,size=20)
+        drawLabel("you can either move your piece or place a wall. Walls cannot", 
+                  420,370,size=20)
+        drawLabel("overlap and you can't fully block the path of any player with ",
+                  420,410,size=20)
+        drawLabel("walls. Each player gets 10 walls only. Start the game to see",
+                  410,440,size=20)
+        drawLabel("how the controls work.",370,470,size=20)
+def drawBeginningScreen(app):
+    #draws intro-screen
+    if app.introScreen: 
+        drawRect(0,0,app.width,app.height,fill="salmon")
+        drawLabel("QUORIDOR",app.width/2,app.height/4,font="Impact",size=59,
+                  fill=app.labelFill)
+        drawLabel("by Jeffery Zhang",app.width/2,app.height/3,font="Impact",
+                  size=20,fill="green")
+        drawImage(app.image,550,400,width=400,height=400)
+        drawLabel("press any key to begin",app.width/2,app.height*2/5,
+                  fill="blue",size=20,font="Impact")
+def redrawAll(app):
+    drawBoard(app)
+    #draws pieces
+    drawPiece(app,int(app.player1.row/2),int(app.player1.col/2),"white")
+    drawPiece(app,int(app.player2.row/2),int(app.player2.col/2),"black")
+    #draws toggle computer-ai buttons
+    drawRect(900,70,200,100,fill="yellow" if type(app.player1)==quoridorPlayer 
+             else None,border="black",borderWidth=5)
+    drawLabel("white: player 1 ",1000,125,size=20,bold=True,fill="purple",
+              font="Impact")
+    drawRect(1200,70,200,100,fill="yellow" if type(app.player1)==computerPlayer 
+             else None,border="black",borderWidth=5)
+    drawLabel("white: computer player "+str(app.player1),1300,125,size=(15 if 
+            type(app.player1)==computerPlayer else 19),fill="purple",bold=True,
+            font="Impact")
+    drawRect(900,750,200,100,fill="yellow" if type(app.player2)==quoridorPlayer 
+             else None,border="black",borderWidth=5)
+    drawLabel("black: player 2 ",1000,800,size=20,bold=True,fill="purple",
+              font="Impact")
+    drawRect(1200,750,200,100,fill="yellow" if type(app.player2)==computerPlayer 
+             else None,border="black",borderWidth=5)
+    drawLabel("black: computer player "+str(app.player2),1300,800,size=(15 if
+     type(app.player2)==computerPlayer else 19)
+              ,bold=True,fill="purple",font="Impact")
+    #helps select AI level
+    if app.computerSelected=="black":
+        drawRect(1200,700,200,50,border="black",fill=None,borderWidth=5)
+        drawLabel("level 1",1300,725,size=20,font="Impact")
+        drawRect(1200,650,200,50,border="black",fill=None,borderWidth=5)
+        drawLabel("level 2",1300,675,size=20,font="Impact")
+    if app.computerSelected=="white":
+        drawRect(1200,170,200,50,border="black",fill=None,borderWidth=5)
+        drawLabel("level 1",1300,195,size=20,font="Impact")
+        drawRect(1200,220,200,50,border="black",fill=None,borderWidth=5)
+        drawLabel("level 2",1300,245,size=20,font="Impact")
+    #draws instructions button
+    #draws game status lavels
+    if not app.gameOver:
+        drawLabel(f"white walls left: {app.player1.wallsLeft}",1000,225,size=25,
+                  bold=True,font="Impact")
+        drawLabel(f"black walls left: {app.player2.wallsLeft}",1000,675,
+                  size=25,bold=True,font="Impact")
+    if not app.gameOver:
+       drawLabel(f"{app.gameBoard.currTurn.color}'s turn",1000,450,size=40,
+                 font='Impact')
+    #draws restart game button
+    if findWinner(app.gameBoard):
+        drawLabel(f"{findWinner(app.gameBoard)} wins!!",1000,400,size=50,
+                  font="Impact")
+        drawRect(900,500,150,100,border="black",fill="green",borderWidth=5)
+        drawLabel("New Game",975,550,size=25,font="Impact")
+    drawAllWalls(app)  
+    drawBeginningScreen(app)
+    drawHelpScreen(app)     
+    drawRect(1440,40,50,50,fill=None,border="black",borderWidth=5)
+    drawLabel("?",app.width-36,65,size=20)
+def drawPiece(app,row,col,color):
+     #draws the piece
+     xPos=app.boardLeft+(app.size)*col+app.size/2
+     yPos=app.boardTop+(app.size)*row+app.size/2
+     drawCircle(xPos,yPos,app.size/2.5,fill=color)
+def onMousePress(app,mouseX,mouseY):
+    #codes buttons
+    if (mouseX>900 and mouseX<1100 and mouseY>70 and mouseY<170):
+        if type(app.player1)==quoridorPlayer:
+            return
+        else:
+            player2=app.player2
+            player2.row=16
+            player2.col=8
+            player2.wallsLeft=10
+            restartGame(app,quoridorPlayer("white",0,8),player2)
+            return
+    #toggles help screen
+    if app.helpScreen:
+        app.helpScreen=False
+    if mouseX>1440 and mouseX<1480 and mouseY>40 and mouseY<90:
+        if app.helpScreen:
+            app.helpScreen=False
+            return
+        app.helpScreen=True
+    if app.introScreen:
+        return False
+    #Controls toggling players and computers
+    if (mouseX>1200 and mouseX<1400 and mouseY>70 and mouseY<170):
+        app.computerSelected="white"
+        return
+    if (mouseX>900 and mouseX<1100 and mouseY>750 and mouseY<850):
+        if type(app.player2)==quoridorPlayer:
+            return
+        else:
+            player1=app.player1
+            player1.row=0
+            player1.col=8
+            player1.wallsLeft=10
+            restartGame(app,player1,quoridorPlayer("black",16,8))
+            return
+    if (mouseX>1200 and mouseX<1400 and mouseY>750 and mouseY<850):
+        app.computerSelected="black"
+        return
+    if (app.computerSelected=="black" and mouseX>1200 
+        and mouseX<1400 and mouseY>700 and mouseY<750):
+        player1=app.player1
+        player1.row=0
+        player1.col=8
+        player1.wallsLeft=10
+        restartGame(app,player1,computerPlayer("black",16,8,1))
+        return
+    if (app.computerSelected=="black" and mouseX>1200 and 
+        mouseX<1400 and mouseY>650 and mouseY<700):
+        player1=app.player1
+        player1.row=0
+        player1.col=8
+        player1.wallsLeft=10
+        restartGame(app,player1,computerPlayer("black",16,8,2))
+        return
+    if (app.computerSelected=="white" and mouseX>1200
+         and mouseX<1400 and mouseY>170 and mouseY<220):
+        player2=app.player2
+        player2.row=16
+        player2.col=8
+        player2.wallsLeft=10
+        restartGame(app,computerPlayer("white",0,8,1),player2)
+        return
+    if (app.computerSelected=="white" and mouseX>1200 
+        and mouseX<1400 and mouseY>220 and mouseY<255):
+        player2=app.player2
+        player2.row=16
+        player2.col=8
+        player2.wallsLeft=10
+        restartGame(app,computerPlayer("white",0,8,2),player2)
+        return
+    #restart game
+    if mouseX>900 and mouseX<1050 and mouseY>500 and mouseY<600 and app.gameOver:
+        player1=app.player1
+        player1.row=0
+        player1.col=8
+        player1.wallsLeft=10
+        player2=app.player2
+        player2.row=16
+        player2.col=8
+        player2.wallsLeft=10
+        restartGame(app,player1,player2)
+        return
+    #no mouse when game is over
+    if app.gameOver:
+        return
+    app.computerSelected=None
+    #no mouse when computer is moving
+    if type(app.gameBoard.currTurn)==computerPlayer:
+        return
+    app.highLightedCells=[]
+    app.selectedCell=(getCell(app,mouseX,mouseY))
+    if app.wallBeingPlaced:
+        return 
+    if not app.selectedCell:
+        return
+    #moves the piece with the mouse
+    if (type(app.gameBoard.board[app.selectedCell[0]*2][app.selectedCell[1]*2])
+==quoridorPlayer):
+        if (app.gameBoard.board[app.selectedCell[0]*2][app.selectedCell[1]*2]!=
+            app.gameBoard.currTurn):
+            return
+        app.movingPiece=True
+        app.pieceCell=copy.deepcopy(app.selectedCell)
+        for drow,dcol in [(2,0),(0,2),(0,-2),(-2,0),(4,0),(0,4),(0,-4),(-4,0)]:
+            if isLegalMove(app.gameBoard.currTurn.row,app.gameBoard.currTurn.col,
+                           drow,dcol,app.gameBoard.board):
+                app.highLightedCells.append(((app.gameBoard.currTurn.row+drow)/2,
+                                        (app.gameBoard.currTurn.col+dcol)/2)) 
+    elif app.movingPiece:
+        drow=app.selectedCell[0]*2-app.pieceCell[0]*2
+        dcol=app.selectedCell[1]*2-app.pieceCell[1]*2
+        if not isLegalMove(app.pieceCell[0]*2,app.pieceCell[1]*2,
+                           drow,dcol,
+                           app.gameBoard.board):
+           
+           return
+        app.gameBoard.currTurn.movePiece(app.gameBoard,
+                                    app.selectedCell[0]*2-app.pieceCell[0]*2,
+                                    app.selectedCell[1]*2-app.pieceCell[1]*2)
+        app.pieceCell=None
+        app.movingPiece=False
+def onKeyPress(app,key):
+    #turns intro screen off
+    if app.introScreen:
+      app.introScreen=False
+      return 
+    #doesn't allow key presses when game is over
+    if app.gameOver:
+        return
+    #doesnt allow key presses when computer player's turn
+    if type(app.gameBoard.currTurn)==computerPlayer:
+        return
+    app.highLightedCells=[]
+    #places walls
+    if key=="space":
+            app.pieceFlashing=True
+            if app.wallBeingPlaced==None:
+               app.wallBeingPlaced=wall([8,7],[10,7])
+            else:
+                app.gameBoard.currTurn.placeWall(app.gameBoard,
+                app.wallBeingPlaced.startRowCol[0],
+                app.wallBeingPlaced.startRowCol[1],
+                app.wallBeingPlaced.direction)
+                app.pieceFlashing=None
+                app.wallBeingPlaced=None
+    #moves and rotates walls
+    if app.wallBeingPlaced!=None:
+        if key=="r":
+          app.wallBeingPlaced.rotate()
+        if key=="up":
+           app.wallBeingPlaced.move(-2,0)
+        if key=="down":
+           app.wallBeingPlaced.move(2,0)
+        if key=="left":
+           app.wallBeingPlaced.move(0,-2)
+        if key=="right":
+           app.wallBeingPlaced.move(0,2)
+        if key=="backspace":
+            app.wallBeingPlaced=None
+        return 
+    #moves pieces
+    if key=="right":
+        app.gameBoard.currTurn.movePiece(app.gameBoard,0,2)
+    if key=="left":
+        app.gameBoard.currTurn.movePiece(app.gameBoard,0,-2)
+    if key=="up":
+        app.gameBoard.currTurn.movePiece(app.gameBoard,-2,0)
+    if key=="down":
+        app.gameBoard.currTurn.movePiece(app.gameBoard,2,0)
+
+#########
+def drawBoard(app):
+    #Draws the board
+    for row in range(app.numRows):
+        for col in range(app.numCols):
+            drawCell(app,row,col)
+    drawRect(app.boardTop,app.boardLeft,app.size*9,
+             app.size*9,fill=None,border="black",borderWidth=8)
+def drawCell(app,row,col):
+    top,left=getCellTopLeft(app,row,col)
+    drawRect(top,left,app.size,app.size,fill="blue" if (app.selectedCell==
+             (row,col) or (row,col) in app.highLightedCells)
+             else "brown",border="black",borderWidth=5)
+def getCellTopLeft(app,row,col):
+    left=app.boardLeft+row*app.size
+    top=app.boardTop+col*app.size
+    return top,left
+#############
+def main():
+      runApp()
+main()
+
+
